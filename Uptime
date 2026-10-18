@@ -1,379 +1,139 @@
--- Blox Fruits: Third Sea Server Hop Script
--- Targets servers around 3:57 hours uptime (237 minutes)
--- Shows a GUI with live server uptime display
-
-local TARGET_UPTIME_MINUTES = 237 -- 3 hours 57 minutes
-local UPTIME_TOLERANCE = 10 -- ±10 minutes tolerance
-local GAME_ID = 7449423635 -- Third Sea place ID
-local TARGET_SEA = 3 -- Third Sea (sea3)
-
--- Services
-local TeleportService = game:GetService("TeleportService")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local CoreGui = game:GetService("CoreGui")
+-- Blox Fruits Third Sea - current server uptime only
+-- No server search, hopping or teleportation.
+-- Requires an external service returning verified server age for the current JobId.
+local PLACE_ID = 7449423635
+local AGE_URL = "https://api.ropro.io/getServerAge.php?serverId="
 local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
 
--- Executor-compatible HTTP function
--- Supports: request(), syn.request(), http.request(), HttpSpy, fluxus, etc.
-local function httpGet(url)
-    if syn and syn.request then
-        local res = syn.request({ Url = url, Method = "GET" })
-        return res.Body
-    elseif http and http.request then
-        local res = http.request({ Url = url, Method = "GET" })
-        return res.Body
-    elseif request then
-        local res = request({ Url = url, Method = "GET" })
-        return res.Body
-    elseif (fluxus and fluxus.request) then
-        local res = fluxus.request({ Url = url, Method = "GET" })
-        return res.Body
-    else
-        -- Last resort: game's HttpService (works in some exploits)
-        return HttpService:GetAsync(url, true)
-    end
-end
-
-local LocalPlayer = Players.LocalPlayer
-
--- ─── GUI Setup ──────────────────────────────────────────────────────────────
-
-local function buildGui()
-    -- Remove existing GUI if present
-    local existing = CoreGui:FindFirstChild("BFServerHopGui")
-    if existing then existing:Destroy() end
-
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "BFServerHopGui"
-    ScreenGui.ResetOnSpawn = false
-    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    ScreenGui.Parent = CoreGui
-
-    -- Main frame
-    local Frame = Instance.new("Frame")
-    Frame.Name = "Main"
-    Frame.Size = UDim2.new(0, 300, 0, 180)
-    Frame.Position = UDim2.new(0.5, -150, 0, 20)
-    Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-    Frame.BorderSizePixel = 0
-    Frame.Parent = ScreenGui
-
-    local Corner = Instance.new("UICorner")
-    Corner.CornerRadius = UDim.new(0, 10)
-    Corner.Parent = Frame
-
-    local Stroke = Instance.new("UIStroke")
-    Stroke.Color = Color3.fromRGB(255, 170, 0)
-    Stroke.Thickness = 2
-    Stroke.Parent = Frame
-
-    -- Title bar
-    local TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 36)
-    TitleBar.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-    TitleBar.BorderSizePixel = 0
-    TitleBar.Parent = Frame
-
-    local TitleCorner = Instance.new("UICorner")
-    TitleCorner.CornerRadius = UDim.new(0, 10)
-    TitleCorner.Parent = TitleBar
-
-    -- Fix bottom corners of title bar
-    local TitleFix = Instance.new("Frame")
-    TitleFix.Size = UDim2.new(1, 0, 0.5, 0)
-    TitleFix.Position = UDim2.new(0, 0, 0.5, 0)
-    TitleFix.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-    TitleFix.BorderSizePixel = 0
-    TitleFix.Parent = TitleBar
-
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -10, 1, 0)
-    TitleLabel.Position = UDim2.new(0, 10, 0, 0)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = "🏝️  Blox Fruits — Server Hop"
-    TitleLabel.TextColor3 = Color3.fromRGB(15, 15, 20)
-    TitleLabel.TextSize = 14
-    TitleLabel.Font = Enum.Font.GothamBold
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = TitleBar
-
-    -- Status label
-    local StatusLabel = Instance.new("TextLabel")
-    StatusLabel.Name = "Status"
-    StatusLabel.Size = UDim2.new(1, -20, 0, 24)
-    StatusLabel.Position = UDim2.new(0, 10, 0, 44)
-    StatusLabel.BackgroundTransparency = 1
-    StatusLabel.Text = "⏳  Searching for Third Sea servers..."
-    StatusLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    StatusLabel.TextSize = 12
-    StatusLabel.Font = Enum.Font.Gotham
-    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    StatusLabel.TextWrapped = true
-    StatusLabel.Parent = Frame
-
-    -- Uptime display
-    local UptimeLabel = Instance.new("TextLabel")
-    UptimeLabel.Name = "Uptime"
-    UptimeLabel.Size = UDim2.new(1, -20, 0, 50)
-    UptimeLabel.Position = UDim2.new(0, 10, 0, 72)
-    UptimeLabel.BackgroundTransparency = 1
-    UptimeLabel.Text = "Server Uptime\n--:--:--"
-    UptimeLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
-    UptimeLabel.TextSize = 18
-    UptimeLabel.Font = Enum.Font.GothamBold
-    UptimeLabel.TextXAlignment = Enum.TextXAlignment.Center
-    UptimeLabel.Parent = Frame
-
-    -- Target label
-    local TargetLabel = Instance.new("TextLabel")
-    TargetLabel.Name = "Target"
-    TargetLabel.Size = UDim2.new(1, -20, 0, 20)
-    TargetLabel.Position = UDim2.new(0, 10, 0, 126)
-    TargetLabel.BackgroundTransparency = 1
-    TargetLabel.Text = "Target: 03:57:00  |  Sea: 3rd"
-    TargetLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-    TargetLabel.TextSize = 11
-    TargetLabel.Font = Enum.Font.Gotham
-    TargetLabel.TextXAlignment = Enum.TextXAlignment.Center
-    TargetLabel.Parent = Frame
-
-    -- Hop button
-    local HopButton = Instance.new("TextButton")
-    HopButton.Name = "HopBtn"
-    HopButton.Size = UDim2.new(1, -20, 0, 30)
-    HopButton.Position = UDim2.new(0, 10, 0, 140)
-    HopButton.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-    HopButton.BorderSizePixel = 0
-    HopButton.Text = "🔍  Find & Hop"
-    HopButton.TextColor3 = Color3.fromRGB(15, 15, 20)
-    HopButton.TextSize = 13
-    HopButton.Font = Enum.Font.GothamBold
-    HopButton.Parent = Frame
-
-    local BtnCorner = Instance.new("UICorner")
-    BtnCorner.CornerRadius = UDim.new(0, 6)
-    BtnCorner.Parent = HopButton
-
-    -- Make the frame draggable
-    local dragging, dragStart, startPos
-    TitleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = Frame.Position
-        end
-    end)
-    TitleBar.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            Frame.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    TitleBar.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-
-    return ScreenGui, StatusLabel, UptimeLabel, HopButton
-end
-
--- ─── Uptime Tracker ─────────────────────────────────────────────────────────
-
--- Uses RoPro API to get real server age in seconds from the current jobId
-local function fetchServerAge(jobId)
-    local url = "https://api.ropro.io/getServerAge.php?serverId=" .. jobId
-    local ok, result = pcall(httpGet, url)
-    if not ok then return nil end
-    local ok2, data = pcall(HttpService.JSONDecode, HttpService, result)
-    if not ok2 then return nil end
-    -- RoPro returns { age: <seconds> }
-    return data.age or data.Age or nil
-end
-
-local serverAgeSeconds = nil
-
-local function getServerUptime()
-    if serverAgeSeconds then
-        -- serverAgeSeconds was fetched at script load, add elapsed time since then
-        return serverAgeSeconds + (os.time() - scriptLoadTime)
-    end
-    return workspace.DistributedGameTime
-end
-
-local scriptLoadTime = os.time()
-
--- Fetch current server's age on load
-task.spawn(function()
-    local jobId = game.JobId
-    if jobId and jobId ~= "" then
-        local age = fetchServerAge(jobId)
-        if age then
-            serverAgeSeconds = age
-            print("[BF Server Hop] RoPro server age:", age, "seconds =", math.floor(age/3600), "h", math.floor((age%3600)/60), "m")
-        else
-            print("[BF Server Hop] RoPro age fetch failed, using fallback")
+local function getBody(url)
+    local candidates = {
+        (syn and syn.request),
+        (http and http.request),
+        request,
+        (fluxus and fluxus.request)
+    }
+    for _, fn in ipairs(candidates) do
+        if type(fn) == "function" then
+            local ok, response = pcall(fn, {Url = url, Method = "GET"})
+            if ok and type(response) == "table" and response.Success ~= false
+                and (not response.StatusCode or response.StatusCode == 200)
+                and type(response.Body) == "string" then
+                return response.Body
+            end
         end
     end
-end)
-
-local function formatTime(seconds)
-    local h = math.floor(seconds / 3600)
-    local m = math.floor((seconds % 3600) / 60)
-    local s = math.floor(seconds % 60)
-    return string.format("%02d:%02d:%02d", h, m, s)
-end
-
--- ─── Server Fetcher ─────────────────────────────────────────────────────────
-
--- Requires the tracker service to return a server with recorded age.
--- Does not hop randomly when uptime data is unavailable.
-
-local TRACKER_URL = "https://bf-tracker.onrender.com"
-
-local function queryTracker()
-    local seaKey = "sea" .. TARGET_SEA
-    local url = string.format("%s/best?sea=%s&target=%d&tolerance=15", TRACKER_URL, seaKey, TARGET_UPTIME_MINUTES)
-    local ok, result = pcall(httpGet, url)
-    if not ok then return nil end
-    local ok2, data = pcall(HttpService.JSONDecode, HttpService, result)
-    if not ok2 or data.error then return nil end
-    return data -- { serverId, ageMinutes, ageHours, diffMinutes }
-end
-
-local function checkTrackerStatus()
-    local ok, result = pcall(httpGet, TRACKER_URL .. "/status")
-    if not ok then return nil end
-    local ok2, data = pcall(HttpService.JSONDecode, HttpService, result)
-    if not ok2 then return nil end
-    return data
-end
-
-local function fetchServers(cursor)
-    local url = string.format(
-        "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s",
-        GAME_ID,
-        cursor and ("&cursor=" .. cursor) or ""
-    )
-    local ok, result = pcall(httpGet, url)
-    if not ok then
-        return nil, "HTTP request failed: " .. tostring(result)
-    end
-    local ok2, data = pcall(HttpService.JSONDecode, HttpService, result)
-    if not ok2 then
-        return nil, "JSON parse failed: " .. tostring(data)
-    end
-    return data, nil
-end
-
--- Get real server age in minutes via RoPro API
-local function getRealUptimeMinutes(jobId)
-    local url = "https://api.ropro.io/getServerAge.php?serverId=" .. tostring(jobId)
-    local ok, result = pcall(httpGet, url)
-    if not ok then return nil end
-    local ok2, data = pcall(HttpService.JSONDecode, HttpService, result)
-    if not ok2 then return nil end
-    -- RoPro returns { "age": <seconds> }
-    local ageSeconds = data.age or data.Age
-    if ageSeconds then
-        return ageSeconds / 60
-    end
+    local ok, body = pcall(function() return HttpService:GetAsync(url, true) end)
+    if ok and type(body) == "string" then return body end
     return nil
 end
 
--- ─── Server Hop Logic ───────────────────────────────────────────────────────
+local previous = CoreGui:FindFirstChild("BFCurrentUptimeGui")
+if previous then previous:Destroy() end
+local gui = Instance.new("ScreenGui")
+gui.Name = "BFCurrentUptimeGui"
+gui.ResetOnSpawn = false
+gui.Parent = CoreGui
+local frame = Instance.new("Frame")
+frame.Size = UDim2.fromOffset(310, 190)
+frame.Position = UDim2.new(0.5, -155, 0, 45)
+frame.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+local corner = Instance.new("UICorner", frame)
+corner.CornerRadius = UDim.new(0, 12)
+local stroke = Instance.new("UIStroke", frame)
+stroke.Color = Color3.fromRGB(255, 170, 0)
+stroke.Thickness = 2
 
-local function findAndHop(statusLabel, uptimeLabel, hopBtn)
-    hopBtn.Text = "🔄  Searching..."
-    hopBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    hopBtn.Active = false
+local function label(text, y, height, size, color)
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -20, 0, height)
+    t.Position = UDim2.fromOffset(10, y)
+    t.BackgroundTransparency = 1
+    t.Text = text
+    t.TextSize = size
+    t.TextColor3 = color
+    t.TextWrapped = true
+    t.Font = Enum.Font.GothamBold
+    t.Parent = frame
+    return t
+end
+local title = label("Blox Fruits | Third Sea", 10, 27, 17, Color3.fromRGB(255, 190, 70))
+local uptime = label("Sunucu yasi bilinmiyor", 48, 50, 20, Color3.fromRGB(255, 230, 160))
+local status = label("Sunucu yasi sorgulaniyor...", 100, 37, 12, Color3.fromRGB(210, 210, 210))
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(1, -20, 0, 33)
+button.Position = UDim2.fromOffset(10, 147)
+button.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
+button.TextColor3 = Color3.fromRGB(20, 20, 20)
+button.Text = "Yeniden kontrol et"
+button.TextSize = 14
+button.Font = Enum.Font.GothamBold
+button.Parent = frame
+Instance.new("UICorner", button).CornerRadius = UDim.new(0, 7)
 
-    -- Try local tracker first (accurate ages from overnight data)
-    statusLabel.Text = "⏳  Checking local tracker..."
-    local trackerResult = queryTracker()
+-- Drag on mouse or touch
+local dragging, startInput, startFrame
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        startInput = input.Position
+        startFrame = frame.Position
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local d = input.Position - startInput
+        frame.Position = UDim2.new(startFrame.X.Scale, startFrame.X.Offset + d.X, startFrame.Y.Scale, startFrame.Y.Offset + d.Y)
+    end
+end)
 
-    local jobId = nil
-    local ageDisplay = ""
-
-    if trackerResult and trackerResult.serverId then
-        jobId = trackerResult.serverId
-        ageDisplay = string.format("~%dh %dm (tracker data, diff: %dm)",
-            math.floor(trackerResult.ageMinutes / 60),
-            math.floor(trackerResult.ageMinutes % 60),
-            math.floor(trackerResult.diffMinutes)
-        )
-        statusLabel.Text = "✅  Tracker found a match: " .. ageDisplay .. "\n🚀  Teleporting in 3s..."
+local measuredAge, measuredAt = nil, nil
+local busy = false
+local function refresh()
+    if busy or not gui.Parent then return end
+    busy = true
+    button.Text = "Kontrol ediliyor..."
+    status.Text = "Mevcut sunucu sorgulaniyor..."
+    local age = nil
+    if game.PlaceId == PLACE_ID and game.JobId ~= "" then
+        local body = getBody(AGE_URL .. HttpService:UrlEncode(game.JobId))
+        if body then
+            local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
+            if ok and type(data) == "table" then
+                local value = tonumber(data.age or data.Age)
+                if value and value >= 0 and value < 315360000 then
+                    age = value -- API convention: seconds; requires source accuracy
+                end
+            end
+        end
+    end
+    if age then
+        measuredAge, measuredAt = age, os.clock()
+        status.Text = "Kaynak: RoPro API (dogrulanmamis)"
     else
-        -- Tracker not running or no data yet — fall back to random hop
-        statusLabel.Text = "❌  No verified uptime match. Tracker is offline or has no matching Third Sea server.\nNo teleport performed."\n        hopBtn.Text = "🔍  Find & Hop"\n        hopBtn.BackgroundColor3 = Color3.fromRGB(255, 170, 0)\n        hopBtn.Active = true\n        return
+        measuredAge, measuredAt = nil, nil
+        uptime.Text = "Sunucu yasi bilinmiyor"
+        status.Text = game.PlaceId ~= PLACE_ID and "Bu panel yalnizca Third Sea icindir." or "Yas verisi alinamadi; tahmin yapilmiyor."
     end
-
-    task.wait(3)
-
-    statusLabel.Text = "🚀  Teleporting..."
-
-    -- Delta executor compatible teleport
-    -- TeleportToPlaceInstance must be called in a new thread on Delta
-    task.spawn(function()
-        local ok, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(GAME_ID, jobId)
-        end)
-        if ok then return end
-
-        -- Fallback: TeleportAsync with TeleportOptions
-        local ok2, err2 = pcall(function()
-            local opts = Instance.new("TeleportOptions")
-            opts.ServerInstanceId = jobId
-            TeleportService:TeleportAsync(GAME_ID, {LocalPlayer}, opts)
-        end)
-        if ok2 then return end
-
-        -- Fallback: Delta sometimes exposes global teleport()
-        local ok3 = pcall(function()
-            if teleport then teleport(GAME_ID, jobId) end
-        end)
-        if ok3 then return end
-
-        -- All failed — show error
-        statusLabel.Text = "❌  Teleport failed: " .. tostring(err2) .. "\nJob ID: " .. tostring(jobId):sub(1,12)
-        hopBtn.Text = "🔍  Find & Hop"
-        hopBtn.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-        hopBtn.Active = true
-    end)
+    button.Text = "Yeniden kontrol et"
+    busy = false
 end
-
--- ─── Main ───────────────────────────────────────────────────────────────────
-
-local ScreenGui, StatusLabel, UptimeLabel, HopButton = buildGui()
-
--- Live uptime ticker — uses workspace.DistributedGameTime for real server age
-local uptimeConnection
-uptimeConnection = RunService.Heartbeat:Connect(function()
-    UptimeLabel.Text = "Server Uptime\n" .. formatTime(getServerUptime())
-end)
-
--- Cleanup on GUI removal
-ScreenGui.AncestryChanged:Connect(function()
-    if not ScreenGui:IsDescendantOf(game) then
-        if uptimeConnection then uptimeConnection:Disconnect() end
+button.MouseButton1Click:Connect(function() task.spawn(refresh) end)
+task.spawn(refresh)
+task.spawn(function()
+    while gui.Parent do
+        if measuredAge and measuredAt then
+            local seconds = math.floor(measuredAge + (os.clock() - measuredAt))
+            uptime.Text = string.format("%d dakika\n%d saat %02d dakika", math.floor(seconds / 60), math.floor(seconds / 3600), math.floor(seconds % 3600 / 60))
+        end
+        task.wait(1)
     end
 end)
-
--- Button click
-HopButton.MouseButton1Click:Connect(function()
-    task.spawn(findAndHop, StatusLabel, UptimeLabel, HopButton)
-end)
-
--- Show real uptime immediately on load
-if serverStartTime then
-    local uptime = os.time() - serverStartTime
-    StatusLabel.Text = string.format("Current-session timer only: %dh %dm.\nClick Find & Hop to query the tracker for a ~3h 57m Third Sea server.",
-        math.floor(uptime/3600), math.floor((uptime%3600)/60))
-else
-    StatusLabel.Text = "✅  Ready! Click Find & Hop to query the tracker for\na ~3h 57m Third Sea server."
-end
-print("[BF Server Hop] Script loaded. GUI visible — click 'Find & Hop' to begin.")
