@@ -1,128 +1,109 @@
--- Blox Fruits Third Sea - current server uptime only
--- No server search, hopping or teleportation.
--- Requires an external service returning verified server age for the current JobId.
-local PLACE_ID = 7449423635
-local AGE_URL = "https://api.ropro.io/getServerAge.php?serverId="
+-- Blox Fruits Third Sea - Current Server Uptime (no server hopping)
+-- External age service is not guaranteed to be available.
 local HttpService = game:GetService("HttpService")
-local CoreGui = game:GetService("CoreGui")
-local UserInputService = game:GetService("UserInputService")
-
-local function getBody(url)
-    local candidates = {
-        (syn and syn.request),
-        (http and http.request),
-        request,
-        (fluxus and fluxus.request)
-    }
-    for _, fn in ipairs(candidates) do
-        if type(fn) == "function" then
-            local ok, response = pcall(fn, {Url = url, Method = "GET"})
-            if ok and type(response) == "table" and response.Success ~= false
-                and (not response.StatusCode or response.StatusCode == 200)
-                and type(response.Body) == "string" then
-                return response.Body
-            end
-        end
-    end
-    local ok, body = pcall(function() return HttpService:GetAsync(url, true) end)
-    if ok and type(body) == "string" then return body end
-    return nil
-end
-
-local previous = CoreGui:FindFirstChild("BFCurrentUptimeGui")
+local Players = game:GetService("Players")
+local THIRD_SEA_IDS = { [7449423635] = true, [100117331123089] = true }
+local currentPlace = game.PlaceId
+local currentJob = game.JobId
+local player = Players.LocalPlayer
+local parentGui = (gethui and gethui()) or (player and player:WaitForChild("PlayerGui"))
+if not parentGui then return end
+local previous = parentGui:FindFirstChild("BFThirdSeaUptimeOnly")
 if previous then previous:Destroy() end
 local gui = Instance.new("ScreenGui")
-gui.Name = "BFCurrentUptimeGui"
+gui.Name = "BFThirdSeaUptimeOnly"
 gui.ResetOnSpawn = false
-gui.Parent = CoreGui
+gui.Parent = parentGui
 local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(310, 190)
-frame.Position = UDim2.new(0.5, -155, 0, 45)
-frame.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+frame.Size = UDim2.fromOffset(320, 190)
+frame.Position = UDim2.new(0.5, -160, 0, 90)
+frame.BackgroundColor3 = Color3.fromRGB(19, 20, 28)
 frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
 frame.Parent = gui
-local corner = Instance.new("UICorner", frame)
-corner.CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
 local stroke = Instance.new("UIStroke", frame)
-stroke.Color = Color3.fromRGB(255, 170, 0)
+stroke.Color = Color3.fromRGB(255, 175, 25)
 stroke.Thickness = 2
-
 local function label(text, y, height, size, color)
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(1, -20, 0, height)
-    t.Position = UDim2.fromOffset(10, y)
     t.BackgroundTransparency = 1
+    t.Position = UDim2.fromOffset(12, y)
+    t.Size = UDim2.new(1, -24, 0, height)
     t.Text = text
+    t.TextColor3 = color or Color3.fromRGB(245, 245, 245)
     t.TextSize = size
-    t.TextColor3 = color
     t.TextWrapped = true
     t.Font = Enum.Font.GothamBold
     t.Parent = frame
     return t
 end
-local title = label("Blox Fruits | Third Sea", 10, 27, 17, Color3.fromRGB(255, 190, 70))
-local uptime = label("Sunucu yasi bilinmiyor", 48, 50, 20, Color3.fromRGB(255, 230, 160))
-local status = label("Sunucu yasi sorgulaniyor...", 100, 37, 12, Color3.fromRGB(210, 210, 210))
+label("Blox Fruits | Third Sea", 10, 26, 16, Color3.fromRGB(255, 190, 65))
+local ageLabel = label("Sunucu yasi bilinmiyor", 48, 38, 20)
+local statusLabel = label("Kontrol bekleniyor", 92, 39, 12, Color3.fromRGB(190, 190, 200))
 local button = Instance.new("TextButton")
-button.Size = UDim2.new(1, -20, 0, 33)
-button.Position = UDim2.fromOffset(10, 147)
-button.BackgroundColor3 = Color3.fromRGB(255, 170, 0)
-button.TextColor3 = Color3.fromRGB(20, 20, 20)
+button.Size = UDim2.new(1, -24, 0, 36)
+button.Position = UDim2.fromOffset(12, 145)
+button.BackgroundColor3 = Color3.fromRGB(255, 175, 25)
 button.Text = "Yeniden kontrol et"
-button.TextSize = 14
+button.TextColor3 = Color3.fromRGB(20, 20, 25)
 button.Font = Enum.Font.GothamBold
+button.TextSize = 14
 button.Parent = frame
 Instance.new("UICorner", button).CornerRadius = UDim.new(0, 7)
-
--- Drag on mouse or touch
-local dragging, startInput, startFrame
-frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        startInput = input.Position
-        startFrame = frame.Position
+local function httpGet(url)
+    local req = (syn and syn.request) or (http and http.request) or request or (fluxus and fluxus.request)
+    if req then
+        local response = req({Url=url, Method="GET"})
+        if response and (response.StatusCode == 200 or response.StatusCode == nil) then
+            return response.Body
+        end
+        return nil
     end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local d = input.Position - startInput
-        frame.Position = UDim2.new(startFrame.X.Scale, startFrame.X.Offset + d.X, startFrame.Y.Scale, startFrame.Y.Offset + d.Y)
-    end
-end)
-
-local measuredAge, measuredAt = nil, nil
+    return HttpService:GetAsync(url)
+end
+local baseAge, fetchedAt = nil, nil
 local busy = false
+local function updateDisplay()
+    if not gui.Parent then return end
+    if baseAge and fetchedAt then
+        local seconds = math.max(0, baseAge + (os.clock() - fetchedAt))
+        local minutes = math.floor(seconds / 60)
+        ageLabel.Text = string.format("%d dakika (%d sa %d dk)", minutes, math.floor(minutes / 60), minutes % 60)
+    else
+        ageLabel.Text = "Sunucu yasi bilinmiyor"
+    end
+end
 local function refresh()
-    if busy or not gui.Parent then return end
+    if busy then return end
     busy = true
     button.Text = "Kontrol ediliyor..."
-    status.Text = "Mevcut sunucu sorgulaniyor..."
-    local age = nil
-    if game.PlaceId == PLACE_ID and game.JobId ~= "" then
-        local body = getBody(AGE_URL .. HttpService:UrlEncode(game.JobId))
-        if body then
-            local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
-            if ok and type(data) == "table" then
-                local value = tonumber(data.age or data.Age)
-                if value and value >= 0 and value < 315360000 then
-                    age = value -- API convention: seconds; requires source accuracy
+    baseAge, fetchedAt = nil, nil
+    updateDisplay()
+    if not THIRD_SEA_IDS[currentPlace] then
+        statusLabel.Text = "Third Sea taninamadi | Place ID: " .. tostring(currentPlace)
+    elseif type(currentJob) ~= "string" or currentJob == "" then
+        statusLabel.Text = "Sunucu Job ID bulunamadi"
+    else
+        statusLabel.Text = "Mevcut sunucu yasi sorgulaniyor..."
+        local url = "https://api.ropro.io/getServerAge.php?serverId=" .. HttpService:UrlEncode(currentJob)
+        local ok, raw = pcall(httpGet, url)
+        if ok and type(raw) == "string" then
+            local decoded, data = pcall(function() return HttpService:JSONDecode(raw) end)
+            if decoded and type(data) == "table" then
+                local seconds = tonumber(data.age or data.Age)
+                if seconds and seconds >= 0 and seconds < 31536000 then
+                    baseAge, fetchedAt = seconds, os.clock()
+                    statusLabel.Text = "RoPro verisi (bagimsiz dogrulanmadi) | Place: " .. tostring(currentPlace)
                 end
             end
         end
+        if not baseAge then
+            statusLabel.Text = "Yas verisi alinamadi; baglanti suren gosterilmiyor."
+        end
     end
-    if age then
-        measuredAge, measuredAt = age, os.clock()
-        status.Text = "Kaynak: RoPro API (dogrulanmamis)"
-    else
-        measuredAge, measuredAt = nil, nil
-        uptime.Text = "Sunucu yasi bilinmiyor"
-        status.Text = game.PlaceId ~= PLACE_ID and "Bu panel yalnizca Third Sea icindir." or "Yas verisi alinamadi; tahmin yapilmiyor."
-    end
+    updateDisplay()
     button.Text = "Yeniden kontrol et"
     busy = false
 end
@@ -130,10 +111,7 @@ button.MouseButton1Click:Connect(function() task.spawn(refresh) end)
 task.spawn(refresh)
 task.spawn(function()
     while gui.Parent do
-        if measuredAge and measuredAt then
-            local seconds = math.floor(measuredAge + (os.clock() - measuredAt))
-            uptime.Text = string.format("%d dakika\n%d saat %02d dakika", math.floor(seconds / 60), math.floor(seconds / 3600), math.floor(seconds % 3600 / 60))
-        end
+        updateDisplay()
         task.wait(1)
     end
 end)
